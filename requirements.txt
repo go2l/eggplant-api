@@ -1,10 +1,6 @@
-streamlit
+Flask
 rembg
 opencv-python
 numpy
 pillow
-matplotlib
-pandas
 gunicorn
-onnxruntime
-Flask
