@@ -1,10 +1,12 @@
-import streamlit as st
+import os
 import numpy as np
 import cv2
 import pandas as pd
-import matplotlib.pyplot as plt
+from flask import Flask, request, jsonify
 from rembg import remove
 from PIL import Image
+
+app = Flask(__name__)
 
 # פונקציה לחישוב כהות
 def calculate_darkness(image):
@@ -18,7 +20,7 @@ def calculate_darkness(image):
 def calculate_color_percentages(image, mask):
     hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
     masked_hsv = hsv[mask > 0]
-    
+
     if masked_hsv.size == 0:
         return {"שחור": 0, "סגול כהה": 0, "סגול בהיר": 0, "חום": 0}
 
@@ -26,10 +28,10 @@ def calculate_color_percentages(image, mask):
     color_percentages = {}
 
     color_ranges = {
-        "שחור": ((0, 0, 0), (180, 255, 50)),  
-        "סגול כהה": ((110, 50, 20), (160, 255, 100)),  
-        "סגול בהיר": ((110, 40, 100), (170, 255, 255)),  
-        "חום": ((5, 40, 20), (40, 255, 200)),  
+        "שחור": ((0, 0, 0), (180, 255, 50)),
+        "סגול כהה": ((110, 50, 20), (160, 255, 100)),
+        "סגול בהיר": ((110, 40, 100), (170, 255, 255)),
+        "חום": ((5, 40, 20), (40, 255, 200)),
     }
 
     for color, (lower, upper) in color_ranges.items():
@@ -47,7 +49,7 @@ def calculate_color_percentages(image, mask):
 
     return color_percentages
 
-# פונקציה לעיבוד תמונה
+# עיבוד תמונה
 def process_image(image):
     removed_bg = remove(image)
     image_np = np.array(removed_bg)
@@ -61,43 +63,26 @@ def process_image(image):
     darkness = calculate_darkness(masked_image)
     color_percentages = calculate_color_percentages(image_np, mask)
 
-    return removed_bg, darkness, avg_color, color_percentages
+    return darkness, avg_color.tolist(), color_percentages
 
-# בניית ממשק משתמש עם Streamlit
-st.set_page_config(page_title="עיבוד תמונת חציל", layout="wide")
+@app.route('/process', methods=['POST'])
+def process():
+    if 'image' not in request.files:
+        return jsonify({"error": "לא נמצאה תמונה"}), 400
 
-st.title("📷 עיבוד תמונת חציל - זיהוי כהות וצבעים")
+    file = request.files['image']
+    image = Image.open(file.stream).convert("RGB")
 
-uploaded_file = st.file_uploader("📤 העלה תמונה (JPEG/PNG)", type=["jpg", "jpeg", "png"])
+    darkness, avg_color, color_percentages = process_image(image)
 
-if uploaded_file is not None:
-    image = Image.open(uploaded_file).convert("RGB")
+    response = {
+        "רמת כהות": darkness,
+        "צבע ממוצע": f"RGB({avg_color[0]}, {avg_color[1]}, {avg_color[2]})",
+        "אחוזי צבעים": color_percentages
+    }
 
-    st.image(image, caption="📸 תמונה מקורית", use_column_width=True)
+    return jsonify(response)
 
-    with st.spinner("🔄 מעבד את התמונה..."):
-        processed_img, darkness, avg_color, color_percentages = process_image(image)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.image(processed_img, caption="🌟 תמונה לאחר הסרת רקע", use_column_width=True)
-
-    with col2:
-        st.subheader("✨ תוצאות:")
-        st.write(f"**רמת כהות:** {darkness}%")
-        st.write(f"**צבע ממוצע:** RGB({avg_color[0]}, {avg_color[1]}, {avg_color[2]})")
-
-        color_df = pd.DataFrame({
-            "צבע": list(color_percentages.keys()),
-            "אחוזים": list(color_percentages.values())
-        })
-
-        st.dataframe(color_df)
-
-        # יצירת גרף
-        fig, ax = plt.subplots()
-        ax.bar(color_percentages.keys(), color_percentages.values(), color=['black', 'purple', 'violet', 'brown'])
-        ax.set_ylabel("אחוזים")
-        ax.set_title("התפלגות הצבעים")
-        st.pyplot(fig)
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))  # יציאה דינמית לפי Render
+    app.run(host="0.0.0.0", port=port, debug=True)
